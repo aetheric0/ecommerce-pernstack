@@ -1,6 +1,6 @@
 // rate product 
 
-import { prisma } from "@/lib/prisma";
+import { prisma, withDbRetry } from "@/lib/prisma";
 import { auth } from "@clerk/nextjs/server"
 import { NextResponse } from "next/server";
 
@@ -73,11 +73,11 @@ export async function GET(request) {
         if(!userId) {
             return NextResponse.json({error: 'Unauthorized'}, {status: 401})
         }
-        const ratings = await prisma.rating.findMany({
+        const ratings = await withDbRetry(() => prisma.rating.findMany({
             where: {userId}
-        })
+        }))
 
-        return NextResponse.json({message: 'fetched rating successfully', rating: ratings}, {status: 201})
+        return NextResponse.json({message: 'Fetched ratings successfully', rating: ratings}, {status: 200})
         
     } catch (error) {
         console.error('Failed to fetch ratings', error)

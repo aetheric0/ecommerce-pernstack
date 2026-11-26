@@ -6,38 +6,46 @@ import { useDispatch, useSelector } from "react-redux";
 import { useEffect } from "react";
 import { fetchProducts } from "@/lib/features/product/productSlice";
 import { useAuth, useUser } from "@clerk/nextjs";
-import { fetchCart, uploadCart } from "@/lib/features/cart/cartSlice";
-import { fetchAddress } from "@/lib/features/address/addressSlice";
-import { fetchUserRating } from "@/lib/features/rating/ratingSlice";
+import { clearCart, fetchCart, uploadCart } from "@/lib/features/cart/cartSlice";
+import { clearAddresses, fetchAddress } from "@/lib/features/address/addressSlice";
+import { clearRatings, fetchUserRating } from "@/lib/features/rating/ratingSlice";
 
 export default function PublicLayout({ children }) {
+    const dispatch = useDispatch();
+    const { user, isLoaded } = useUser();
+    const { getToken } = useAuth();
 
-    const dispatch = useDispatch()
-    const {user} = useUser()
-    const {getToken} = useAuth()
+    const dirty = useSelector((state) => state.cart.dirty);
+    const cartStatus = useSelector((state) => state.cart.status);
 
-    const cartItems = useSelector((state)=>state.cart)
+    useEffect(() => {
+        dispatch(fetchProducts({}));
+    }, [dispatch]);
 
-    useEffect(()=>{
-        dispatch(fetchProducts({}))
+    useEffect(() => {
+        if (!isLoaded) return;
 
-    },[])
-
-    useEffect(()=>{
-        if(user){
-            dispatch(fetchCart({getToken}))
-            dispatch(fetchAddress({getToken}))
-            dispatch(fetchUserRating({getToken}))
+        if (user?.id) {
+            const cartRequest = dispatch(fetchCart({ getToken }));
+            const addressRequest = dispatch(fetchAddress({ getToken }));
+            const ratingRequest = dispatch(fetchUserRating({ getToken }));
+            return () => {
+                cartRequest.abort();
+                addressRequest.abort();
+                ratingRequest.abort();
+            };
+        } else {
+            dispatch(clearCart());
+            dispatch(clearAddresses());
+            dispatch(clearRatings());
         }
+    }, [user?.id, isLoaded, dispatch, getToken]);
 
-    },[user])
-
-    useEffect(()=>{
-        if(user) {
-        dispatch(uploadCart({getToken}))
+    useEffect(() => {
+        if (isLoaded && user?.id && dirty && cartStatus === 'succeeded') {
+            dispatch(uploadCart({ getToken }));
         }
-
-    },[cartItems])
+    }, [dirty, cartStatus, user?.id, isLoaded, dispatch, getToken]);
 
     return (
         <>

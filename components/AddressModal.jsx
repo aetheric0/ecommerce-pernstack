@@ -32,19 +32,19 @@ const AddressModal = ({ setShowAddressModal }) => {
 
     const handleSubmit = async (e) => {
         e.preventDefault()
+        const toastId = toast.loading('Adding address...')
         try {
             const token = await getToken()
             const {data} = await axios.post('/api/address', {address}, { headers: {Authorization: `Bearer ${token}`}})
             dispatch(addAddress(data.newAddress))
-            toast.success(data.message)
+            toast.success(data.message, { id: toastId })
             setShowAddressModal(false)
          }catch (error) {
-            console.log(error)
-            toast.error(error?.response?.data?.message || error.message)  
+            toast.error(error?.response?.data?.error || error.message, { id: toastId })
         }
     }
     return (
-        <form onSubmit={e => toast.promise(handleSubmit(e), { loading: 'Adding Address...' })} className="fixed inset-0 z-50 bg-white/60 backdrop-blur h-screen flex items-center justify-center">
+        <form onSubmit={handleSubmit} className="fixed inset-0 z-50 bg-white/60 backdrop-blur h-screen flex items-center justify-center">
             <div className="flex flex-col gap-5 text-slate-700 w-full max-w-sm mx-6">
                 <h2 className="text-3xl ">Add New <span className="font-semibold">Address</span></h2>
                 <input name="name" onChange={handleAddressChange} value={address.name} className="p-2 px-4 outline-none border border-slate-200 rounded w-full" type="text" placeholder="Enter your name" required />

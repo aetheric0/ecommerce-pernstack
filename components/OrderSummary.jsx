@@ -8,7 +8,7 @@ import toast from 'react-hot-toast';
 import { useRouter } from 'next/navigation';
 import { useAuth, useUser } from '@clerk/nextjs';
 import axios from 'axios';
-import { fetchCart, clearCart } from '@/lib/features/cart/cartSlice';
+import { clearCart } from '@/lib/features/cart/cartSlice';
 
 const OrderSummary = ({ totalPrice, items }) => {
     const { user } = useUser();
@@ -49,66 +49,102 @@ const OrderSummary = ({ totalPrice, items }) => {
         }
     };
 
-    const handlePlaceOrder = async (e) => {
-        e.preventDefault();
-        try {
-            if (!user) return toast.error('Please login to place order');
-            if (!selectedAddress) return toast.error('Please select an address to place order');
-            
-            setLoading(true);
-            const token = await getToken();
-            const orderData = {
-                addressId: selectedAddress.id,
-                paymentMethod,
-                items,
-                shippingFee: Number(shippingFee),
-                totalAmount: Number(finalTotal),
-                ...(coupon && { couponCode: coupon.code })
-            };
-            
-            const res = await axios.post('/api/orders', orderData, {
-                headers: { Authorization: `Bearer ${token}` }
-            });
+const handlePlaceOrder = async (e) => {
+    e?.preventDefault();
+    if (loading) return;
 
-            if (paymentMethod === 'PAYSTACK') {
-                const session = res.data.paystackSession;
-                if (!session || !session.access_code) {
-                    throw new Error('Failed to provision secure Paystack authorization codes');
-                }
-                
-                const { default: PaystackPop } = await import('@paystack/inline-js');
-                const popup = new PaystackPop();
+    if (!user) {
+        toast.error('Please login to place order');
+        return;
+    }
 
-                popup.resumeTransaction(session.access_code, {
-                    onSuccess: () => {
-                        toast.success('Payment completed successfully!');
+    if (!selectedAddress) {
+        toast.error('Please select an address to place order');
+        return;
+    }
+
+    setLoading(true);
+    const toastId = toast.loading(
+        paymentMethod === 'PAYSTACK' ? 'Initializing payment...' : 'Placing your order...'
+    );
+
+    try {
+        const token = await getToken();
+        const orderData = {
+            addressId: selectedAddress.id,
+            paymentMethod,
+            items,
+            shippingFee: Number(shippingFee),
+            totalAmount: Number(finalTotal),
+            ...(coupon && { couponCode: coupon.code })
+        };
+
+        const res = await axios.post('/api/orders', orderData, {
+            headers: { Authorization: `Bearer ${token}` }
+        });
+
+        if (paymentMethod === 'PAYSTACK') {
+            const session = res.data.paystackSession;
+            if (!session || !session.access_code) {
+                throw new Error('Failed to provision secure Paystack authorization codes');
+            }
+
+            toast.dismiss(toastId);
+
+            const { default: PaystackPop } = await import('@paystack/inline-js');
+            const popup = new PaystackPop();
+
+            popup.resumeTransaction(session.access_code, {
+                onSuccess: async (transaction) => {
+                    const verifyToastId = toast.loading('Confirming your payment...');
+                    try {
+                        const freshToken = await getToken();
+                        const reference = transaction?.reference || session.reference;
+
+                        await axios.post(
+                            '/api/orders/verify',
+                            { reference },
+                            { headers: { Authorization: `Bearer ${freshToken}` } }
+                        );
+
+                        toast.success('Payment verified! Order placed.', { id: verifyToastId });
                         dispatch(clearCart());
-                        dispatch(fetchCart({ getToken }));
                         setLoading(false);
                         router.push('/orders');
-                    },
-                    onCancel: () => {
-                        toast.error("Transaction window closed. Items are safely saved in your cart.");
+                        router.refresh();
+                    } catch (verifyError) {
+                        toast.error(
+                            verifyError?.response?.data?.error ||
+                            'Payment received, syncing order status...',
+                            { id: verifyToastId }
+                        );
+                        dispatch(clearCart());
                         setLoading(false);
-                    },
-                    onError: (error) => {
-                        toast.error(`Paystack Error: ${error.message}`);
-                        setLoading(false);
+                        router.push('/orders');
+                        router.refresh();
                     }
-                });
-
-            } else {
-                toast.success(res.data.message);
-                dispatch(clearCart());
-                dispatch(fetchCart({ getToken }));
-                setLoading(false);
-                router.push('/orders');
-            } 
-        } catch (error) {
+                },
+                onCancel: () => {
+                    toast.error("Transaction window closed. Items are safely saved in your cart.");
+                    setLoading(false);
+                },
+                onError: (error) => {
+                    toast.error(`Paystack Error: ${error.message}`);
+                    setLoading(false);
+                }
+            });
+        } else {
+            toast.success(res.data.message || 'Order Placed!', { id: toastId });
+            dispatch(clearCart());
             setLoading(false);
-            toast.error(error?.response?.data?.error || error.message);
+            router.push('/orders');
+            router.refresh();
         }
-    };
+    } catch (error) {
+        setLoading(false);
+        toast.error(error?.response?.data?.error || error.message, { id: toastId });
+    }
+};
 
     return (
         <div className='w-full max-w-lg lg:max-w-[340px] bg-slate-50/30 border border-slate-200 text-slate-500 text-sm rounded-xl p-7'>
@@ -181,21 +217,14 @@ const OrderSummary = ({ totalPrice, items }) => {
                 </p>
             </div>
             
-            <button 
-                onClick={e => {
-                    if (!loading) {
-                        toast.promise(handlePlaceOrder(e), {
-                            loading: paymentMethod === 'PAYSTACK' ? 'Verifying inventory levels...' : 'Placing Order...',
-                            success: paymentMethod === 'PAYSTACK' ? 'Redirecting to payment operator...' : 'Order Placed!',
-                            error: 'Failed to process order'
-                        });
-                    }
-                }} 
+            <button
+                type="button"
+                onClick={handlePlaceOrder}
                 disabled={loading || items.length === 0}
                 className={`w-full text-white py-2.5 rounded active:scale-95 transition-all disabled:opacity-50 font-medium cursor-pointer ${
                     paymentMethod === 'PAYSTACK' && !loading ? 'bg-green-500 hover:bg-teal-700' : 'bg-amber-500 hover:bg-slate-900'
                 }`}
-            >
+>
                 {loading ? "Processing..." : paymentMethod === 'PAYSTACK' ? "Pay with Paystack" : "Place Order"}
             </button>
 
